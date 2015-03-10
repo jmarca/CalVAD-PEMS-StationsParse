@@ -16,35 +16,81 @@ use CalVAD::PEMS::StationsParse;
 use File::Find;
 use Digest::MD5;
 
+#### This is the part where options are set
 
+##################################################
+# read the config file
+##################################################
+my $config_file = './config.json';
+my $cfg = {};
 
-my $user   = $ENV{PSQL_USER} || q{};
-my $pass   = $ENV{PSQL_PASS} || q{};
-my $host   = $ENV{PSQL_HOST} || q{};
-my $dbname = $ENV{PSQL_DB}   || 'spatialvds';
-my $port   = $ENV{PSQL_PORT} || 5432;
-my $path;
+# check if right permissions on file, if so, use it
+if( -e $config_file){
+    my @mode = (stat($config_file));
+    my $str_mode = sprintf "%04o", $mode[2];
+    if( $str_mode == 100600 ){
+
+        $cfg = Config::Any->load_files({files => [$config_file],
+                                        flatten_to_hash=>1,
+                                        use_ext => 1,
+                                       });
+        # simplify the hashref down to just the one file
+        $cfg = $cfg->{$config_file};
+    }else{
+        croak "permissions for $config_file are $str_mode.  Set permissions to 0600 (only the user can read or write)";
+    }
+}
+else{
+  # if no config file, then just note that and move on
+    carp "no config file $config_file found";
+}
+
+##################################################
+# translate config file into variables, for command line override
+##################################################
+
+my $year     = $cfg->{'year'};
+my $district = $cfg->{'district'};
+my $path     = $cfg->{'path'};
 my $help;
-my $cdb_user   = $ENV{COUCHDB_USER} || q{};
-my $cdb_pass   = $ENV{COUCHDB_PASS} || q{};
-my $cdb_host   = $ENV{COUCHDB_HOST} || '127.0.0.1';
-my $cdb_dbname = $ENV{COUCHDB_DB}   || 'vds_imputed_csv';
-my $cdb_globaltracker = $ENV{COUCHDB_TRACKER}   || 'vdsdata/tracking';
-my $cdb_port   = $ENV{COUCHDB_PORT} || '5984';
+my $outdir = $cfg->{'outdir'} || q{};
+
+my $user = $cfg->{'postgresql'}->{'username'} || $ENV{PGUSER} || q{};
+my $pass = $cfg->{'postgresql'}->{'password'}
+  || q{};    # never use a postgres password, use config file or .pgpass
+my $host = $cfg->{'postgresql'}->{'host'} || $ENV{PGHOST} || '127.0.0.1';
+my $user = $cfg->{'postgresql'}->{'username'} || $ENV{PGUSER} || q{};
+my $pass = $cfg->{'postgresql'}->{'password'} || q{};
+# never use a postgres password, use config file or .pgpass
+my $host = $cfg->{'postgresql'}->{'host'} || $ENV{PGHOST} || '127.0.0.1';
+my $dbname =
+    $cfg->{'postgresql'}->{'calvad_pems_stationsparse_db'};
+  || 'spatialvds';
+my $port = $cfg->{'postgresql'}->{'port'} || $ENV{PGPORT} || 5432;
+
+my $cdb_user =
+  $cfg->{'couchdb'}->{'auth'}->{'username'} || $ENV{COUCHDB_USER} || q{};
+my $cdb_pass = $cfg->{'couchdb'}->{'auth'}->{'password'}
+  || q{};
+my $cdb_host = $cfg->{'couchdb'}->{'host'} || $ENV{COUCHDB_HOST} || '127.0.0.1';
+my $cdb_dbname =
+    $cfg->{'couchdb'}->{'calvad_pems_stationsparse_db'};
+  || $ENV{COUCHDB_DB}
+  || 'pems_stations_parsed';
+my $cdb_port = $cfg->{'couchdb'}->{'port'} || $ENV{COUCHDB_PORT} || '5984';
+
+my $reparse = $cfg->{'reparse'} || q{};
 
 
-my $reparse;
-my $pattern = 'd\d{2}_stations_\d{4}_\d{2}_\d{2}.txt';
+my $pattern = $cfg->{'pattern'} || 'd\d{2}_text_meta_\d{4}_\d{2}_\d{2}.txt';
 
 
 my $result = GetOptions(
     'username:s'  => \$user,
-    'password:s'  => \$pass,
     'host:s'      => \$host,
     'db:s'        => \$dbname,
     'port:i'      => \$port,
     'cusername:s' => \$cdb_user,
-    'cpassword:s' => \$cdb_pass,
     'chost:s'     => \$cdb_host,
     'cdb:s'       => \$cdb_dbname,
     'cport:i'     => \$cdb_port,
@@ -54,7 +100,7 @@ my $result = GetOptions(
     'help|?'      => \$help
 );
 
-if ( !$result || $help ) {
+if ( !$result || !$path  || $help ) {
     pod2usage(1);
 }
 
@@ -98,7 +144,7 @@ my $parser = WIM::ParsePublic->new(
     'dbname_couchdb'   => $cdb_dbname,
     'username_couchdb' => $cdb_user,
     'password_couchdb' => $cdb_pass,
-                                   # 'create'           => 1,
+    'create'           => 1,
 
 );
 
