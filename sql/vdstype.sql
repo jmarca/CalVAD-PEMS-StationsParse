@@ -17,7 +17,7 @@ SET search_path = public, pg_catalog;
 
 COPY vdstypes (id, description) FROM stdin;
 CD	Coll/Dist
-CH	Convetional Highway
+CH	Conventional Highway
 FF	Fwy-Fwy
 FR	Off Ramp
 HV	HOV
