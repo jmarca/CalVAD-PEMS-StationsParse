@@ -253,14 +253,14 @@ $fh->close();
 
 done_testing;
 
-# END{
-#     $connect = undef;
-#     $obj = undef;
-#     eval{
-#         my $dbh = DBI->connect("dbi:Pg:dbname=$admindb", $adminuser);
-#         $dbh->do("drop database $dbname");
-#     };
-#     if($@){
-#         carp $@;
-#     }
-# }
+END{
+    $connect = undef;
+    $obj = undef;
+    eval{
+        my $dbh = DBI->connect("dbi:Pg:dbname=$admindb", $adminuser);
+        $dbh->do("drop database $dbname");
+    };
+    if($@){
+        carp $@;
+    }
+}
