@@ -6,6 +6,7 @@ use Data::Dumper;
 use version; our $VERSION = qv('0.0.3');
 use English qw(-no_match_vars);
 use Carp;
+use Config::Any;
 
 use Getopt::Long;
 use Pod::Usage;
@@ -59,13 +60,8 @@ my $user = $cfg->{'postgresql'}->{'username'} || $ENV{PGUSER} || q{};
 my $pass = $cfg->{'postgresql'}->{'password'}
   || q{};    # never use a postgres password, use config file or .pgpass
 my $host = $cfg->{'postgresql'}->{'host'} || $ENV{PGHOST} || '127.0.0.1';
-my $user = $cfg->{'postgresql'}->{'username'} || $ENV{PGUSER} || q{};
-my $pass = $cfg->{'postgresql'}->{'password'} || q{};
-# never use a postgres password, use config file or .pgpass
-my $host = $cfg->{'postgresql'}->{'host'} || $ENV{PGHOST} || '127.0.0.1';
 my $dbname =
-    $cfg->{'postgresql'}->{'calvad_pems_stationsparse_db'};
-  || 'spatialvds';
+    $cfg->{'postgresql'}->{'calvad_pems_stationsparse_db'} || 'spatialvds';
 my $port = $cfg->{'postgresql'}->{'port'} || $ENV{PGPORT} || 5432;
 
 my $cdb_user =
@@ -74,7 +70,7 @@ my $cdb_pass = $cfg->{'couchdb'}->{'auth'}->{'password'}
   || q{};
 my $cdb_host = $cfg->{'couchdb'}->{'host'} || $ENV{COUCHDB_HOST} || '127.0.0.1';
 my $cdb_dbname =
-    $cfg->{'couchdb'}->{'calvad_pems_stationsparse_db'};
+    $cfg->{'couchdb'}->{'calvad_pems_stationsparse_db'}
   || $ENV{COUCHDB_DB}
   || 'pems_stations_parsed';
 my $cdb_port = $cfg->{'couchdb'}->{'port'} || $ENV{COUCHDB_PORT} || '5984';
@@ -129,7 +125,7 @@ carp 'going to process ', scalar @files, ' files';
 
 
 # make a parser of data
-my $parser = WIM::ParsePublic->new(
+my $parser = CalVAD::PEMS::StationsParse->new(
 
     # first the sql role
     'host_psql'     => $host,
@@ -166,19 +162,14 @@ for my $file (@files) {
     }
     # filenames look like: d03_stations_2008_08_08.txt
     # parse out the data using regex
-    my $filedate;
-    if ( $file =~ /(\d+)_0*(\d+)_0*(\d+)/sxm ) {
-        my $dt =
-          DateTime::Format::DateParse->parse_datetime( "$1-$2-$3", 'floating' );
-        $filedate = DateTime::Format::Pg->format_date($dt);
-    }
+    my $filedate = $parser->guess_date($file);
     if ( !$filedate ) {
         croak "couldn't parse a date from input filename $file";
     }
     # track based on digest of file
     my $digest = digest_file($file);
     carp join q/ :  /,$digest,$file;
-    my $row = $parser->track( 'id' => $digest  );
+    my $row = $parser->track( 'id' => $digest );
     if ( $row < 0 ){
       if(!$reparse ) {
         carp "skipping $file, $digest already done according to parser";
@@ -187,6 +178,13 @@ for my $file (@files) {
         # are we checking digest?  now we are
       }
     }
+    # add the filename to the couchdb...while md5 is useful, it isn't readable
+    $parser->track( 'id' => $digest,
+                    'otherdata' => {
+                        'filename' => $file,
+                        'date'=>$filedate,
+                    },
+        );
 
     my $gzip;
     if ( $file =~ /.txt(\.gz)$/xms ) {
@@ -202,7 +200,7 @@ for my $file (@files) {
       # no op
     }
     if($handle){
-        my $err = eval { slurpcode($handle,$filedate); };
+        my $err = eval { $parser->parse_file($handle,$filedate); };
 
         carp $handle->input_line_number();
 

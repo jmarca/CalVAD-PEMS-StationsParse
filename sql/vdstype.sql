@@ -17,6 +17,7 @@ SET search_path = public, pg_catalog;
 
 COPY vdstypes (id, description) FROM stdin;
 CD	Coll/Dist
+CH	Convetional Highway
 FF	Fwy-Fwy
 FR	Off Ramp
 HV	HOV
@@ -28,4 +29,3 @@ OR	On Ramp
 --
 -- PostgreSQL database dump complete
 --
-

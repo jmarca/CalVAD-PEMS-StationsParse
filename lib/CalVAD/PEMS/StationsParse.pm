@@ -328,6 +328,17 @@ class StationsParse using Moose : ro {
         return;
     }
 
+    method trim_ca_pm ($value){
+        # trim overly long state_pm values, because varchar(12) in db
+        if($value =~ /(\D*)(.+)/g){
+            my $reformed = $1 . sprintf("%.3f",$2);
+            # truncate any excess zeros at the end
+            $reformed =~ s/0*$//;
+            $value =  $reformed;
+        }
+        return $value;
+
+    }
 
     method get_vds_or_die(Int $pk, HashRef $data){
         # carp "get vds or die";
@@ -351,9 +362,10 @@ class StationsParse using Moose : ro {
             my $attrs = {
                 'id'     => $pk,
                 'name'   => $data->{'name'},
-                'cal_pm' => $data->{'state_pm'},
+                'cal_pm' => $self->trim_ca_pm($data->{'state_pm'}),
                 'abs_pm' => $data->{'abs_pm'},
             };
+
 
             $test_eval =
                 eval {
@@ -449,17 +461,9 @@ class StationsParse using Moose : ro {
         my $attrs = {
             'id'     => $pk,
             'name'   => $data->{'name'},
-            'cal_pm' => $data->{'state_pm'},
+            'cal_pm' => $self->trim_ca_pm($data->{'state_pm'}),
             'abs_pm' => $data->{'abs_pm'},
         };
-
-        # trim overly long state_pm values, because varchar(12) in db
-        if($attrs->{'cal_pm'} =~ /(\D*)(.+)/g){
-            my $reformed = $1 . sprintf("%.3f",$2);
-            # truncate any excess zeros at the end
-            $reformed =~ s/0*$//;
-            $attrs->{'cal_pm'} =  $reformed;
-        }
         # carp $attrs;
         my $geo = {};
         if ( $data->{'latitude'} && $data->{'latitude'} ne q{} ) {
