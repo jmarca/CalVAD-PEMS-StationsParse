@@ -4,13 +4,18 @@ package CalVAD::PEMS;
 use Moops;
 # ABSTRACT: Breaks up the daily all-vds-per-district files into yearly per vds files
 
-class Breakup using Moose : ro {
+class StationsParse using Moose : ro {
 
     use Carp;
     use Data::Dumper;
+    use English qw(-no_match_vars);
     use File::Path qw(make_path);
     use Testbed::Spatial::VDS::Schema;
+    use DateTime::Format::Pg;
+    use DateTime::Format::Strptime;
+    use Text::CSV;
     with 'CouchDB::Trackable';
+
 
     my $param = 'psql';
 
@@ -29,64 +34,290 @@ class Breakup using Moose : ro {
           lazy=>1,
         );
 
+    has 'geometry_gen_code' => (
+        'is' => 'ro',
+        'isa'=>'CodeRef',
+        'init_arg'=>undef,
+        'builder'=>'_build_geometry_gen_code',
+        'lazy'=>1
+        );
+
     method _build_csv {
         # set up the csv parser
         my $csv = Text::CSV->new( { 'sep_char' => "\t",
                                     'allow_loose_quotes'=>1,
+                                    'blank_is_undef'=>1,
                                   } );
 
         # bind variables to lines
         $csv->column_names(
             qw{vdsid fwy dir district county city state_pm abs_pm latitude longitude length type lanes name user_id_1 user_id_2 user_id_3 user_id_4}
             );
+
+        $csv->types ([Text::CSV::IV (), # vdsid
+                      Text::CSV::IV (), # fwy
+                      Text::CSV::PV (), # dir
+                      Text::CSV::IV (), # district
+                      Text::CSV::IV (), # county
+                      Text::CSV::IV (), # city
+                      Text::CSV::PV (), # state_pm
+                      Text::CSV::NV (), # abs_pm
+                      Text::CSV::NV (), # latitude
+                      Text::CSV::NV (), # longitude
+                      Text::CSV::NV (), # length
+                      Text::CSV::PV (), # type
+                      Text::CSV::IV (), # lanes
+                      Text::CSV::PV (), # name
+                      Text::CSV::PV (), Text::CSV::PV (), Text::CSV::PV (), Text::CSV::PV (),# user_id_1..4
+                     ]);
+
+
         return $csv;
     }
 
 
+    method get_new_geoid {
+        my $geoid;
+        my $test_eval = eval { $geoid = $self->resultset('Public::GeomId')->create( { 'dummy' => 1 } ); };
+        if ($EVAL_ERROR) {    # find or create failed
+            carp "can't create new geomid $EVAL_ERROR";
+            croak;
+        }
+        return $geoid;
+    }
 
-    sub _build_inner_loop_method {
-
-        my $slurpcode = sub {
-            my ($fh,$filedate) = @_;
-            #burn the first line
-            $self->csv->getline_hr($fh);
-            my $linenum = 1;
-            my $data;
-            while ( $data = $self->csv->getline_hr($fh)) {
-                $linenum++;
-                #good read.
-                # tack on filedate as version information
-                $data->{'version'} = $filedate;
-                my $pk = $data->{'vdsid'};
-                # carp "$linenum, $pk";
-
-                # make join tables
-                if ( !dbload($data) ) {
-                    carp 'problem with line', Dumper $data;
-                    my $err = $self->csv->error_input;
-                    carp "parse () failed on argument:  $err \n";
-                    $self->csv->error_diag();
-
+    method create_geompoint_4269 ($lon,$lat,$gid){
+        my $creategeom;
+        # ST_GeometryFromText('POINT("+lon+" "+lat+")',"+SRID+")
+        my $geomfn = join q{}, 'POINT(', $lon, q{ }, $lat, q{)};
+        my $arr = [ q/ST_GeometryFromText(?,4269)/, ['dummy'=>$geomfn] ];
+        my $test_eval = eval {
+            $creategeom = $self->resultset('Public::GeomPoints4269')->create(
+                {
+                    gid  => $gid,
+                    geom => \$arr,
                 }
+                )};
+        if ($EVAL_ERROR) {    # find or create failed
+            carp "can't create new geometry $EVAL_ERROR";
+            croak;
+        }
+
+        # carp 'created new geom_points_4269 entry';
+        return $creategeom;
+    }
+    method project_geom_4326(Int $gid4269,Int $gid4326){
+        # carp "projecting from $gid4269 to $gid4326";
+        my $transform;
+        my $test_eval = eval {
+            my $arr = [q/ST_AsText(ST_Transform(me.geom,4326))/];
+            ($transform) = $self->resultset('Public::GeomPoints4269')->search(
+                { 'gid' => $gid4269 },
+                {
+                    select => [ 'gid', \$arr ],
+                    as => [qw/gid  wkt_transform /],
+                },
+                );
+        };
+        if ($EVAL_ERROR) {    # find or create failed
+            carp "can't fetch transform $EVAL_ERROR";
+            croak;
+        }
+        # carp 'got a transform';
+        # carp $transform;
+        # carp $transform->get_column('wkt_transform');
+        my $projectedpoint;
+        $test_eval = eval {
+            my $arr = [
+                q{ST_GeometryFromText(?,4326)},
+                ['dummy'=>$transform->get_column('wkt_transform')]
+                ];
+            $projectedpoint = $self->resultset('Public::GeomPoints4326')->create(
+                {
+                    gid  => $gid4326,
+                    geom => \$arr,
+                }
+                );
+	};
+        if ($EVAL_ERROR) {    # find or create failed
+            carp "can't create new tranformed geometry $EVAL_ERROR";
+            croak;
+        }
+        return $projectedpoint;
+    }
+
+    method join_geom($vds,$gid,$projection){
+        # carp "test projection of $projection";
+        if($projection != 4269 && $projection != 4326){
+            croak "unknown projection $projection";
+        }
+        # carp "joining vds to point $projection";
+        my $table = 'Public::VdsPoints' . $projection;
+        my $join;
+        my $test_eval = eval {
+            ($join) =
+                $self->resultset($table)->search( { 'vds_id' => $vds->id, } );
+        };
+        if ($EVAL_ERROR) {    # find or create failed
+            carp "can't search for joins $EVAL_ERROR";
+            croak;
+        }
+        # carp 'did not crash searching for join';
+        if ( !$join ) {
+            # carp 'need to create new join';
+            $test_eval = eval {
+                $join = $self->resultset($table)->create(
+                    {
+                        'gid'    => $gid,
+                        'vds_id' => $vds->id,
+                    }
+                    );
+            };
+            if ($EVAL_ERROR) {    # find or create failed
+                carp "can't create new join $EVAL_ERROR";
+                croak;
+            }
+
+        }
+        else {
+            # have an existing join.  Update with new gid
+            $join->gid($gid);
+            $join->update();
+        }
+        return;
+    }
+
+    method _build_geometry_gen_code{
+        my $coderef = sub {
+            my ( $vds, $lat, $lon ) = @_;
+
+            # carp "$vds is    ", join "\n  ",
+            map { join q{;}, "$_", $vds->$_ } (qw/id name latitude longitude/);
+
+            # correct the vds data
+            #     carp join q{ }, 'vds correction: id is ', $vds->id, $vds->longitude, 'to',
+            #       $lon, '  and ', $vds->latitude, 'to', $lat,;
+
+            if ($lon) {
+                $vds->longitude($lon);
+            }
+            if ($lat) {
+                $vds->latitude($lat);
+            }
+            $vds->update;
+            $lon = $vds->longitude;
+            $lat = $vds->latitude;
+
+            if(!$lat || !$lon){
+                return $vds;
+            }
+            # carp "$vds is    ", join "\n  ",
+            map { join q{;}, "$_", $vds->$_ } (qw/id name latitude longitude/);
+
+            # get a new geometry id from the db
+            my $new_geoid = $self->get_new_geoid;
+
+            # use the new id to create 4269 (unprojected) geometry from lat lon data
+            my $gid        = $new_geoid->gid;
+            my $creategeom = $self->create_geompoint_4269($lon,$lat,$gid);
+
+            ## join that with the current vds object
+            # carp 'join with vds';
+            $self->join_geom($vds,$gid,4269);
+            # carp 'transform 4269 to 4324';
+            # create a new, projected point to 4326 projection
+
+            # transform the geometry
+            # create a gid for the 4326 projection
+            $new_geoid = $self->get_new_geoid();
+            my $projectedgid        = $new_geoid->gid;
+            ## and the actual point
+
+            my $projectedpoint = $self->project_geom_4326($gid,$projectedgid);
+
+            $self->join_geom($vds,$projectedgid,4326);
+
+            # carp 'updated vds_points_4326   and _4269  tables';
+            return $vds;
+        };
+        return $coderef;
+    }
+
+
+    method _build_inner_loop_method {
+
+        return sub {}
+    }
+    method parse_file($fh,$filedate){
+        my $csv = $self->csv;
+        #burn the first line
+        $csv->getline($fh);
+        my $linenum = 1;
+        my $data;
+        while ( $data = $csv->getline_hr($fh)) {
+            $linenum++;
+            #good read.
+            # tack on filedate as version information
+            $data->{'version'} = $filedate;
+            my $pk = $data->{'vdsid'};
+            # carp "$linenum, $pk";
+
+            # make join tables
+            if ( !$self->dbload($data) ) {
+                carp 'problem with line', Dumper $data;
+                my $err = $csv->error_input;
+                carp "parse () failed on argument:  $err \n";
+                $csv->error_diag();
 
             }
-            carp "returning";
-            #my $err = $self->csv->error_input;
-            #carp "parse () failed on argument:  $err \n";
-            carp Dumper $self->csv->error_diag();
 
-            # carp Dumper $data;
-
-            return;
         }
-        return $slurpcode;
+        # carp "returning";
+        #my $err = $self->csv->error_input;
+        #carp "parse () failed on argument:  $err \n";
+        # carp Dumper $self->csv->error_diag();
+
+        # carp Dumper $data;
+
+        return;
+    }
+
+    method _build__connection_psql {
+        # carp 'building connection';
+        my ( $host, $port, $dbname, $username, $password ) =
+            map { $self->$_ }
+        map { join q{_}, $_, $param }
+        qw/ host port dbname username password /;
+        my $vdb = Testbed::Spatial::VDS::Schema->connect(
+            "dbi:Pg:dbname=$dbname;host=$host;port=$port",
+            $username, $password, {}, { 'disable_sth_caching' => 1 } );
+        return $vdb;
+    }
+
+    with 'DB::Connection' => {
+        'name'                  => 'psql',
+        'connection_type'       => 'Testbed::Spatial::VDS::Schema',
+        'connection_delegation' => qr/^(.*)/sxm,
+    };
+
+    method guess_date($filename){
+
+        my $strp = DateTime::Format::Strptime->new(
+            pattern   => '%Y-%m-%d',
+            );
+
+        if ( $filename =~ /(\d{4})_(\d{2})_(\d{2})/sxm ) {
+            my $dt = $strp->parse_datetime("$1-$2-$3");
+            return DateTime::Format::Pg->format_date($dt);
+        }
+        return ;
     }
 
     method create_geometries ($vds) {
 
         # geometry
         my $rs;
-        my $test = eval { $rs = $parser->txn_do( $coderef1, $vds ); };
+        my $test = eval { $rs = $self->txn_do( $self->geometry_gen_code, $vds ); };
         if ( !$test || $EVAL_ERROR ) {    # Transaction failed
             if ( $EVAL_ERROR =~ /Rollback failed/xms ) {
                 croak q{rollback failed ... the sky is falling!};  # Rollback failed
@@ -98,59 +329,53 @@ class Breakup using Moose : ro {
     }
 
 
-    ## TODO, break this into pieces
+    method get_vds_or_die(Int $pk, HashRef $data){
+        # carp "get vds or die";
+        # carp $self;
+        # carp "pk is $pk";
+        # carp "data is $data";
 
-    method dbload ($data){
-        my $pk = $data->{'vdsid'};
-
-        if ( !$pk ) { return; }
-        my $attrs = {
-            'id'     => $data->{'vdsid'},
-            'name'   => $data->{'name'},
-            'cal_pm' => $data->{'state_pm'},
-            'abs_pm' => $data->{'abs_pm'},
-        };
-
-        # trim overly long state_pm values, because varchar(12) in db
-        if($attrs->{'cal_pm'} =~ /(\D*)(.+)/g){
-            my $reformed = $1 . sprintf("%.3f",$2);
-            # truncate any excess zeros at the end
-            $reformed =~ s/0*$//;
-            $attrs->{'cal_pm'} =  $reformed;
-        }
-
-        my $options = {};
-        if ( $data->{'latitude'} && $data->{'latitude'} ne q{} ) {
-            $options->{'latitude'} = $data->{'latitude'};
-        }
-        if ( $data->{'longitude'} && $data->{'longitude'} ne q{} ) {
-            $options->{'longitude'} = $data->{'longitude'};
-        }
         my $vds;
-        my $test_eval = eval { $vds = $parser->resultset('VdsIdAll')->find($pk); };
+        my $test_eval = eval {
+            my $rs = $self->resultset('Public::VdsIdAll');
+            $vds = $rs->find($pk);
+        };
         if ($EVAL_ERROR) {    # find or create failed
-            carp "find vds failed, test eva $test_eval, error $EVAL_ERROR";
-            carp 'input data is ',     Dumper($data);
-            carp 'grabbed anything? ', $vds;
-            croak;
+            # carp "find vds failed, test_eval= $test_eval, error= $EVAL_ERROR";
+            # carp 'input data is ',     Dumper($data);
+            #croak;
         }
+        # at the moment, this won't trigger because I croak above
         if ( !$vds ) {
+            # carp 'going to build a new vds id';
+            my $attrs = {
+                'id'     => $pk,
+                'name'   => $data->{'name'},
+                'cal_pm' => $data->{'state_pm'},
+                'abs_pm' => $data->{'abs_pm'},
+            };
+
             $test_eval =
-                eval { $vds = $parser->resultset('VdsIdAll')->find_or_create($attrs); };
+                eval {
+                    $vds = $self->resultset('Public::VdsIdAll')
+                        ->create($attrs);
+            };
             if ( !$test_eval || $EVAL_ERROR ) {    # find or create failed
-                carp 'find or create failed failed, ', $EVAL_ERROR;
+                carp 'create failed failed, ', $EVAL_ERROR;
                 carp 'input data is ',                 Dumper($data);
                 carp 'attrs hash is ',                 Dumper($attrs);
                 croak;
             }
         }
-        # carp "check geometries";
-        # check geometries for need for update
+        return $vds
+    }
+
+    method check_geometries (HashRef $geo, Ref $vds){
         my $dogeom = 0;
-        if (   ( $options->{'latitude'} && $options->{'longitude'} )
+        if (   ( $geo->{'latitude'} && $geo->{'longitude'} )
                && ( !$vds->latitude || !$vds->longitude ) )
         {
-            carp 'must update geometries';
+            # carp 'must update geometries';
             $dogeom = 1;
         }else{
             # carp "check geometries step 2";
@@ -164,33 +389,24 @@ class Breakup using Moose : ro {
             #     croak;
             # }
             if(!$rs){
-                carp 'must update geometries';
+                # carp 'must update geometries';
                 $dogeom=1;
             } else {
                 # carp "check geometries step 4";
                 $rs       = $vds->vds_points_4326();
                 if ( !$rs ) {
-                    carp 'must update geometries';
+                    # carp 'must update geometries';
                     $dogeom=1;
                 }
             }
         }
-        # carp "slurp keys";
-        foreach ( keys %{$attrs} ) {
-            $vds->$_( $attrs->{$_} );
-        }
-        # carp "slurp options";
-        if ($options) {
-            foreach ( keys %{$options} ) {
-                $vds->$_( $options->{$_} );
-            }
-            $vds->update();
-        }
+        return $dogeom;
 
-        # carp "version table stuff";
+    }
 
+    method update_versioned_table(HashRef $data){
         # now update the versioned table
-        $attrs = {
+        my $attrs = {
             'id'      => $data->{'vdsid'},
             'lanes'   => $data->{'lanes'},
             'version' => $data->{'version'},
@@ -203,55 +419,98 @@ class Breakup using Moose : ro {
         # carp "find is stupid, create is king";
         # find is stupid.  create is king
         my $vds_versioned;
-        $test_eval = eval {
+        my $test_eval = eval {
             $vds_versioned =
-                $parser->resultset('VdsVersioned')->find_or_create($attrs);
+                $self->resultset('Public::VdsVersioned')->find_or_create($attrs);
         };
+
         if ( !$test_eval || $EVAL_ERROR ) {    # find or create failed
             carp 'create failed for vds_versioned, ', $EVAL_ERROR;
             carp 'input data is ',                    Dumper($data);
             carp 'attrs hash is ',                    Dumper($attrs);
             croak;
         }
+        return;
+    }
+
+
+    method dbload (HashRef $data){
+
+
+        my $pk = 0+$data->{'vdsid'};
+        if ( !$pk ) { return; }
+
+        # carp Dumper $pk;
+
+        my $vds = $self->get_vds_or_die($pk,$data);
+        # carp $vds->id;
+
+        # any of these might have changed
+        my $attrs = {
+            'id'     => $pk,
+            'name'   => $data->{'name'},
+            'cal_pm' => $data->{'state_pm'},
+            'abs_pm' => $data->{'abs_pm'},
+        };
+
+        # trim overly long state_pm values, because varchar(12) in db
+        if($attrs->{'cal_pm'} =~ /(\D*)(.+)/g){
+            my $reformed = $1 . sprintf("%.3f",$2);
+            # truncate any excess zeros at the end
+            $reformed =~ s/0*$//;
+            $attrs->{'cal_pm'} =  $reformed;
+        }
+        # carp $attrs;
+        my $geo = {};
+        if ( $data->{'latitude'} && $data->{'latitude'} ne q{} ) {
+            $geo->{'latitude'} = $data->{'latitude'};
+        }
+        if ( $data->{'longitude'} && $data->{'longitude'} ne q{} ) {
+            $geo->{'longitude'} = $data->{'longitude'};
+        }
+
+        # carp "check geometries";
+        # check geometries for need for update
+        my $dogeom = $self->check_geometries($geo,$vds);
+
+
+        # carp "slurp keys";
+        # copy attributes from $attrs to the $vds object
+        foreach ( keys %{$attrs} ) {
+            $vds->$_( $attrs->{$_} );
+        }
+        # carp "slurp geo";
+        if ($geo) {
+            foreach ( keys %{$geo} ) {
+                $vds->$_( $geo->{$_} );
+            }
+            $vds->update();
+        }
+
+        # carp "version table stuff";
+        $self->update_versioned_table($data);
+
+        ##################################################
+        # make various joins
+        ##################################################
 
         # carp "making joins districtjoin";
-        # make various joins
-        my $districtjoin = $parser->resultset('VdsDistrict')->find_or_create(
+        my $districtjoin = $self->resultset('Public::VdsDistrict')->find_or_create(
             {
                 'district_id' => $data->{'district'},
                 'vds_id'      => $vds->id,
             }
             );
         # carp "making joins vdstypejoin";
-        my $vdstype     = fetch_vdstype($data);
-        my $vdstypejoin;
-        $test_eval = eval {
-            $vdstypejoin  = $parser->resultset('VdsVdstype')->find_or_create(
-                {
-                    'type_id' => $vdstype->id,
-                    'vds_id'  => $vds->id,
-                }
-                );
-        };
-        if ( !$test_eval || $EVAL_ERROR ) {    # find or create failed
-            carp 'create failed for vdstypjoin, ', $EVAL_ERROR;
-            croak;
-        }
+        $self->vdstypejoin($data,$vds);
 
         # carp "making joins freewayjoin";
-        my $freeway     = fetch_freeway($data);
-        my $freewayjoin = $parser->resultset('VdsFreeway')->find_or_create(
-            {
-                'freeway_id'  => $freeway->id,
-                'freeway_dir' => $data->{'dir'},
-                'vds_id'      => $vds->id,
-            }
-            );
+        $self->freewayjoin($data,$vds);
 
         # carp "update geometries?";
 
         if ($dogeom) {
-            carp 'updating geometries';
+            # carp 'updating geometries';
             $self->create_geometries($vds);
         }
         # carp 'returning';
@@ -263,189 +522,68 @@ class Breakup using Moose : ro {
         croak $EVAL_ERROR;
     }
 
-    method fetch_freeway ($freeway) {
+    method freewayjoin (HashRef $data, Ref $vds){
+        my $freeway     = $self->fetch_freeway($data->{'fwy'});
+        eval{
+            my $freewayjoin = $self->resultset('Public::VdsFreeway')->find_or_create(
+                {
+                    'freeway_id'  => $freeway->id,
+                    'freeway_dir' => $data->{'dir'},
+                    'vds_id'      => $vds->id,
+                }
+                );
+        };
+        if ( $EVAL_ERROR ) {    # find or create failed
+            carp 'create failed for freewayjoin, ', $EVAL_ERROR;
+            croak;
+        }
+        return;
 
-        my $freeway = $parser->resultset('Freeway')->find_or_create(
+    }
+
+    method fetch_freeway ($freewayid) {
+
+        my $freeway = $self->resultset('Public::Freeway')->find_or_create(
             {
-                'name' => $freeway,
-                'id'   => $freeway,
+                'name' => $freewayid,
+                'id'   => $freewayid,
             }
             );
         return $freeway;
     }
 
-    method fetch_vdstype ($type) {
-        my $vdstype;
-
+    method vdstypejoin (HashRef $data, Ref $vds){
+        # carp 'vdstypejon';
+        my $vdstype     = $self->fetch_vdstype($data->{'type'});
+        my $vdstypejoin;
         my $test_eval = eval {
-            $vdstype  =
-                $parser->resultset('Vdstype')->find( { 'id' => $type, } );
+            $vdstypejoin  = $self->resultset('Public::VdsVdstype')->find_or_create(
+                {
+                    'type_id' => $vdstype->id,
+                    'vds_id'  => $vds->id,
+                }
+                );
         };
         if ( !$test_eval || $EVAL_ERROR ) {    # find or create failed
             carp 'create failed for vdstypjoin, ', $EVAL_ERROR;
             croak;
         }
+        return;
+    }
+
+    method fetch_vdstype ($type) {
+        my $vdstype;
+        # carp 'fetch_vdstype';
+        my $test_eval = eval {
+            $vdstype  =
+                $self->resultset('Public::Vdstype')->find( { 'id' => $type, } );
+        };
+        if ( !$test_eval || $EVAL_ERROR ) {    # find or create failed
+            carp 'find failed for vdstype, ', $EVAL_ERROR;
+            croak;
+        }
         return $vdstype;
     }
-
-    my $coderef1 = sub {
-        my ( $vds, $lat, $lon ) = @_;
-
-        carp "$vds is    ", join "\n  ",
-        map { join q{;}, "$_", $vds->$_ } (qw/id name latitude longitude/);
-
-        # correct the vds data
-        #     carp join q{ }, 'vds correction: id is ', $vds->id, $vds->longitude, 'to',
-        #       $lon, '  and ', $vds->latitude, 'to', $lat,;
-
-        if ($lon) {
-            $vds->longitude($lon);
-        }
-        else {
-            $lon = $vds->longitude;
-        }
-        if ($lat) {
-            $vds->latitude($lat);
-        }
-        else {
-            $lat = $vds->latitude;
-        }
-        $vds->update;
-
-        if(!$lat || !$lon){
-            return $vds;
-        }
-        carp "$vds is    ", join "\n  ",
-        map { join q{;}, "$_", $vds->$_ } (qw/id name latitude longitude/);
-        my $new_geoid;
-        my $test_eval = eval { $new_geoid = $parser->resultset('GeomId')->create( { 'dummy' => 1 } ); };
-        if ($EVAL_ERROR) {    # find or create failed
-            carp "can't create new geomid $EVAL_ERROR";
-            croak;
-        }
-
-
-        # use the new id to create 4269 (unprojected) geometry from lat lon data
-        # GeometryFromText('POINT("+lon+" "+lat+")',"+SRID+")
-        my $geomfn = join q{}, 'POINT(', $lon, q{ }, $lat, q{)};
-
-        carp "geometry function is $geomfn, new geoid is ", $new_geoid->gid;
-        my $gid        = $new_geoid->gid;
-        my $creategeom;
-        $test_eval = eval {
-            $creategeom = $parser->resultset('GeomPoints4269')->create(
-                {
-                    gid  => $gid,
-                    geom => \[ q/GeometryFromText(?,4269)/, ['dummy'=>$geomfn] ],
-                }
-        );
-    };
-    if ($EVAL_ERROR) {    # find or create failed
-        carp "can't create new geometry $EVAL_ERROR";
-        croak;
-    }
-
-    carp 'created new geom_points_4269 entry';
-    my $join;
-    $test_eval = eval {
-        ($join) =
-            $parser->resultset('VdsPoints4269')->search( { 'vds_id' => $vds->id, } );
-    };
-    if ($EVAL_ERROR) {    # find or create failed
-        carp "can't search for joins $EVAL_ERROR";
-        croak;
-    }
-
-    if ( !$join ) {
-        carp 'need to create new join';
-        $test_eval = eval {
-            $join = $parser->resultset('VdsPoints4269')->create(
-                {
-                    'gid'    => $gid,
-                    'vds_id' => $vds->id,
-                }
-                );
-	};
-        if ($EVAL_ERROR) {    # find or create failed
-            carp "can't create new join $EVAL_ERROR";
-            croak;
-        }
-
-    }
-    else {
-        $join->gid($gid);
-        $join->update();
-    }
-
-    carp 'now reproject the 4269 to 4326';
-
-    #
-
-    # transform the geometry
-    # create a gid for the 4326 projection
-    $test_eval = eval {
-        $new_geoid = $parser->resultset('GeomId')->create( { 'dummy' => 1 } );
-    };
-    if ($EVAL_ERROR) {    # find or create failed
-        carp "can't create new geomids $EVAL_ERROR";
-        croak;
-    }
-
-    my $transform;
-    $test_eval = eval {
-        ($transform) = $parser->resultset('GeomPoints4269')->search(
-            { 'gid' => $gid },
-            {
-                select => [ 'gid', \[q/AsText(Transform(me.geom,4326))/] ],
-            as => [qw/gid  wkt_transform /],
-            },
-    );
-};
-if ($EVAL_ERROR) {    # find or create failed
-    carp "can't create new join $EVAL_ERROR";
-    croak;
-}
-carp 'got a transform';
-my $projectedpoint;
-$test_eval = eval {
-    $projectedpoint = $parser->resultset('GeomPoints4326')->create(
-        {
-            gid  => $new_geoid->gid,
-            geom => \[
-                q{GeometryFromText(?,4326)},
-                ['dummy'=>$transform->get_column('wkt_transform')]
-        ],
-        }
-);
-};
-if ($EVAL_ERROR) {    # find or create failed
-    carp "can't create new tranformed geometry $EVAL_ERROR";
-croak;
-}
-
-$test_eval = eval {
-    ($join) =
-    $parser->resultset('VdsPoints4326')->search( { 'vds_id' => $vds->id, } );
-};
-if ($EVAL_ERROR) {    # find or create failed
-    carp "can't create new join $EVAL_ERROR";
-croak;
-}
-if ( !$join ) {
-    $join = $parser->resultset('VdsPoints4326')->create(
-        {
-            'gid'    => $new_geoid->gid,
-            'vds_id' => $vds->id,
-        }
-    );
-}
-else {
-    $join->gid($projectedpoint);
-$join->update();
-}
-carp 'updated vds_points_4326   and _4269  tables';
-return $vds;
-};
 
 
 }
