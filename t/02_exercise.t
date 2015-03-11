@@ -244,11 +244,11 @@ isnt($filedate,undef,'got file date');
 my $handle = $fh->open($file);
 ok($handle,'opened file');
 
-# $w = [warnings{
-$obj->parse_file($fh,$filedate);
-# }];
+$w = [warnings{
+    $obj->parse_file($fh,$filedate);
+      }];
 $fh->close();
-#is(scalar @{$w},0,'no problems parsing file');
+is(scalar @{$w},0,'no problems parsing file');
 
 
 done_testing;
