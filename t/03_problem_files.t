@@ -183,7 +183,7 @@ isnt($obj, undef, 'object creation should work with all required fields');
 isa_ok($obj,'CalVAD::PEMS::StationsParse','it is okay');
 
 # this is going to hurt
-$obj->storage->debug(1);
+# $obj->storage->debug(1);
 
 my $fh = IO::File->new();
 my $file = File::Spec->rel2abs('./t/files/d12_text_meta_2015_01_28.txt');
