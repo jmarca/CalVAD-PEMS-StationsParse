@@ -80,6 +80,7 @@ my $reparse = $cfg->{'reparse'} || q{};
 
 my $pattern = $cfg->{'pattern'} || 'd\d{2}_text_meta_\d{4}_\d{2}_\d{2}.txt';
 
+my $debug = 0;
 
 my $result = GetOptions(
     'username:s'  => \$user,
@@ -93,6 +94,7 @@ my $result = GetOptions(
     'path=s'      => \$path,
     'pattern=s'   => \$pattern,
     'reparse'     => \$reparse,
+    'debug'     => \$debug,
     'help|?'      => \$help
 );
 
@@ -145,7 +147,9 @@ my $parser = CalVAD::PEMS::StationsParse->new(
 );
 
 
-
+if($debug){
+    $parser->storage->debug(1);
+}
 
 
 # make filehandle
