@@ -187,6 +187,8 @@ if($@) {
 
 isnt($connect, undef, 'db connection should be possible');
 isa_ok($connect,'Testbed::Spatial::VDS::Schema','it is okay');
+$connect = undef;
+
 # use the connection
 my $rs = $obj->resultset('Public::VdsIdAll');
 isa_ok($rs,'DBIx::Class::ResultSet','got a result set');
@@ -236,6 +238,11 @@ if($@){
     croak $@;
 }
 
+
+##################################################
+# now the file
+##################################################
+
 my $fh = IO::File->new();
 my $file = File::Spec->rel2abs('./t/files/d05_text_meta_2012_02_25.txt');
 my $filedate = $obj->guess_date($file);
@@ -244,7 +251,7 @@ isnt($filedate,undef,'got file date');
 my $handle = $fh->open($file);
 ok($handle,'opened file');
 
-$w = [warnings{
+my $w = [warnings{
     $obj->parse_file($fh,$filedate);
       }];
 $fh->close();
@@ -252,10 +259,10 @@ is(scalar @{$w},0,'no problems parsing file');
 
 
 done_testing;
+$obj->storage->disconnect();
+$obj = undef;
 
 END{
-    $connect = undef;
-    $obj = undef;
     eval{
         my $dbh = DBI->connect("dbi:Pg:dbname=$admindb", $adminuser);
         $dbh->do("drop database $dbname");

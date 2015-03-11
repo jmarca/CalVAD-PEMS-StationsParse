@@ -152,9 +152,8 @@ for my $args ( $postgis_args, $postgis_topology_args, $db_deploy_args,
     my @sysargs = @{$args};
     $outcome += system(@sysargs);
 }
-my $madehere = 1;
-if($outcome){
-    $madehere = 0;
+if($outcome){ 
+    croak 'database already exists';
 }
 
 my $obj;
@@ -200,16 +199,15 @@ $fh->close();
 is(scalar @{$w} , 0 ,'no problems parsing file');
 
 done_testing;
+$obj->storage->disconnect();
 
 END{
-    if($madehere){
-        $obj = undef;
-        eval{
-            my $dbh = DBI->connect("dbi:Pg:dbname=$admindb", $adminuser);
-            $dbh->do("drop database $dbname");
-        };
-        if($@){
-            carp $@;
-        }
+    eval{
+        my $dbh = DBI->connect("dbi:Pg:dbname=$admindb", $adminuser);
+        $dbh->do("drop database $dbname");
+    };
+    if($@){
+        carp $@;
     }
+
 }
