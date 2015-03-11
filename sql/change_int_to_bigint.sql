@@ -49,3 +49,7 @@ alter    TABLE imputed.vds_wim_neighbors alter column vds_id type bigint;
 alter    TABLE imputed.vds_wim_pairs alter column vds_id type bigint;
 
 alter    TABLE vds_id_all alter column id type bigint;
+
+
+-- also need this
+insert into vdstypes (id, description) values ('CH', 'Conventional Highway');
