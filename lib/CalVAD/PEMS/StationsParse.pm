@@ -583,7 +583,7 @@ class StationsParse using Moose : ro {
                 $self->resultset('Public::Vdstype')->find( { 'id' => $type, } );
         };
         if ( !$test_eval || $EVAL_ERROR ) {    # find or create failed
-            carp 'find failed for vdstype, ', $EVAL_ERROR;
+            carp 'find failed for vdstype $type: ', $EVAL_ERROR;
             croak;
         }
         return $vdstype;
