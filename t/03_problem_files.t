@@ -82,7 +82,7 @@ isnt($cdb_pass,undef,'need a valid couch pass defined in "couchdb":"auth":"passw
 
 my $admin_dbh;
 eval{
-    $admin_dbh = DBI->connect("dbi:Pg:dbname=$admindb", $adminuser);
+    $admin_dbh = DBI->connect("dbi:Pg:dbname=$admindb;host=$host;port=$port", $adminuser);
 };
 if($@) {
     carp 'must have valid admin credentials in test.config.json, and a valid admin password setup in .pgpass file';
@@ -152,7 +152,7 @@ for my $args ( $postgis_args, $postgis_topology_args, $db_deploy_args,
     my @sysargs = @{$args};
     $outcome += system(@sysargs);
 }
-if($outcome){ 
+if($outcome){
     croak 'database already exists';
 }
 
