@@ -264,7 +264,7 @@ $obj = undef;
 
 END{
     eval{
-        my $dbh = DBI->connect("dbi:Pg:dbname=$admindb", $adminuser);
+        my $dbh = DBI->connect("dbi:Pg:dbname=$admindb;host=$host;port=$port", $adminuser);
         $dbh->do("drop database $dbname");
     };
     if($@){
