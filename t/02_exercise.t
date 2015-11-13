@@ -82,7 +82,6 @@ isnt($cdb_pass,undef,'need a valid couch pass defined in "couchdb":"auth":"passw
 
 my $admin_dbh;
 eval{
-    carp "dbi:Pg:dbname=$admindb;host=$host;port=$port";
     $admin_dbh = DBI->connect("dbi:Pg:dbname=$admindb;host=$host;port=$port", $adminuser);
 };
 if($@) {
