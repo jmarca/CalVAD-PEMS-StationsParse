@@ -22,8 +22,14 @@ To install, use Dist::Zilla.
 First install Dist::Zilla using cpan or cpanm
 
 ```
-cpanm --sudo Dist::Zilla
+sudo cpanm Dist::Zilla
 ```
+
+Note that cpanm also has a --sudo option, but on an ARB machine during
+testing it was the case that using `cpanm --sudo Dist::Zilla` resulted
+in hundreds of passwords being requested for each install action.
+
+
 
 Next install the Dist::Zilla plugins needed.
 
