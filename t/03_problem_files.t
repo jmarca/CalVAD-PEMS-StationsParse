@@ -46,7 +46,7 @@ my $path     = $cfg->{'path'};
 my $help;
 
 my $user = $cfg->{'postgresql'}->{'username'} || $ENV{PGUSER} || q{};
-my $pass = $cfg->{'postgresql'}->{'password'} || q{};
+# my $pass = $cfg->{'postgresql'}->{'password'} || q{};
 # never use a postgres password, use config file or .pgpass
 my $host = $cfg->{'postgresql'}->{'host'} || $ENV{PGHOST} || '127.0.0.1';
 my $dbname =
