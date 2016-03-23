@@ -102,22 +102,14 @@ information.
 Once the prerequisites are installed and the tests pass, you can
 install.  This will again run the tests.
 
-Two ways to do this.  First is to use sudo -E
-
-```
-sudo -E dzil install
-```
-
-The second is to use cpanm as the install command.
+Use cpanm as the install command.
 
 ```
 dzil install --install-command "cpanm --sudo ."
 ```
 
-I prefer the second way.  You have to be sudo to install the module
-in the global perl library, but there is no need to be sudo to run the
-tests.  This second way uses the "sudo" flag for cpanm only when
-installing, not for testing.
+This way uses the "sudo" flag for cpanm only when installing, not for
+testing.
 
 # Running the script to breakup and transpose the data
 
