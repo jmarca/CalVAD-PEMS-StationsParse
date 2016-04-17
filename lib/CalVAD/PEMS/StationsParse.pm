@@ -212,7 +212,7 @@ class StationsParse using Moose : ro {
                 return $vds;
             }
             # carp "$vds is    ", join "\n  ",
-            map { join q{;}, "$_", $vds->$_ } (qw/id name latitude longitude/);
+            # map { join q{;}, "$_", $vds->$_ } (qw/id name latitude longitude/);
 
             # get a new geometry id from the db
             my $new_geoid = $self->get_new_geoid;
