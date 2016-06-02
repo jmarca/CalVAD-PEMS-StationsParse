@@ -22,12 +22,13 @@ To install, use Dist::Zilla.
 First install Dist::Zilla using cpan or cpanm
 
 ```
-sudo cpanm Dist::Zilla
+cpanm --sudo Dist::Zilla
 ```
 
-Note that cpanm also has a --sudo option, but on an ARB machine during
-testing it was the case that using `cpanm --sudo Dist::Zilla` resulted
-in hundreds of passwords being requested for each install action.
+Note on an ARB machine during testing it was the case that using
+`cpanm --sudo Dist::Zilla` resulted in hundreds of passwords being
+requested for each install action.  If that happens bail out, and try
+running `sudo cpanm Dist::Zilla`.
 
 
 
@@ -101,22 +102,14 @@ information.
 Once the prerequisites are installed and the tests pass, you can
 install.  This will again run the tests.
 
-Two ways to do this.  First is to use sudo -E
-
-```
-sudo -E dzil install
-```
-
-The second is to use cpanm as the install command.
+Use cpanm as the install command.
 
 ```
 dzil install --install-command "cpanm --sudo ."
 ```
 
-I prefer the second way.  You have to be sudo to install the module
-in the global perl library, but there is no need to be sudo to run the
-tests.  This second way uses the "sudo" flag for cpanm only when
-installing, not for testing.
+This way uses the "sudo" flag for cpanm only when installing, not for
+testing.
 
 # Running the script to breakup and transpose the data
 
