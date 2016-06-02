@@ -359,9 +359,10 @@ class StationsParse using Moose : ro {
         # at the moment, this won't trigger because I croak above
         if ( !$vds ) {
             # carp 'going to build a new vds id';
+            my $detectorname   = $data->{'name'} || $data->{'user_id_1'} || $data->{'user_id_2'} || $data->{'user_id_3'} || $data->{'user_id_4'};
             my $attrs = {
                 'id'     => $pk,
-                'name'   => $data->{'name'},
+                'name'   => $detectorname,
                 'cal_pm' => $self->trim_ca_pm($data->{'state_pm'}),
                 'abs_pm' => $data->{'abs_pm'},
             };
