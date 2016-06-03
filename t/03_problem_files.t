@@ -198,13 +198,31 @@ my $w = [warnings{
 $fh->close();
 is(scalar @{$w} , 0 ,'no problems parsing file');
 
+# now a district 4 file issue.
+
+
+$fh = IO::File->new();
+$file = File::Spec->rel2abs('./t/files/d04_text_meta_2014_03_28.txt');
+$filedate = $obj->guess_date($file);
+isnt($filedate,undef,'got file date');
+
+$handle = $fh->open($file);
+ok($handle,'opened file');
+
+$w = [warnings{
+    $obj->parse_file($fh,$filedate);
+         }];
+$fh->close();
+is(scalar @{$w} , 0 ,'no problems parsing file');
+
+
 done_testing;
 $obj->storage->disconnect();
 
 END{
     eval{
-        my $dbh = DBI->connect("dbi:Pg:dbname=$admindb;host=$host;port=$port", $adminuser);
-        $dbh->do("drop database $dbname");
+        # my $dbh = DBI->connect("dbi:Pg:dbname=$admindb;host=$host;port=$port", $adminuser);
+        # $dbh->do("drop database $dbname");
     };
     if($@){
         carp $@;
