@@ -220,12 +220,12 @@ done_testing;
 $obj->storage->disconnect();
 
 END{
-    # eval{
-    #     my $dbh = DBI->connect("dbi:Pg:dbname=$admindb;host=$host;port=$port", $adminuser);
-    #     $dbh->do("drop database $dbname");
-    # };
-    # if($@){
-    #     carp $@;
-    # }
+    eval{
+        my $dbh = DBI->connect("dbi:Pg:dbname=$admindb;host=$host;port=$port", $adminuser);
+        $dbh->do("drop database $dbname");
+    };
+    if($@){
+        carp $@;
+    }
 
 }
