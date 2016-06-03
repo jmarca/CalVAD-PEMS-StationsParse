@@ -459,9 +459,11 @@ class StationsParse using Moose : ro {
         # carp $vds->id;
 
         # any of these might have changed
+        my $detectorname   = $data->{'name'} || $data->{'user_id_1'} || $data->{'user_id_2'} || $data->{'user_id_3'} || $data->{'user_id_4'};
+
         my $attrs = {
             'id'     => $pk,
-            'name'   => $data->{'name'},
+            'name'   => $detectorname,
             'cal_pm' => $self->trim_ca_pm($data->{'state_pm'}),
             'abs_pm' => $data->{'abs_pm'},
         };
