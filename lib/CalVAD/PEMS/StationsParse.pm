@@ -508,7 +508,7 @@ class StationsParse using Moose : ro {
                 'vds_id'      => $vds->id,
             }
             );
-        # carp "making joins vdstypejoin";
+        carp "making joins vdstypejoin";
         $self->vdstypejoin($data,$vds);
 
         # carp "making joins freewayjoin";
@@ -560,11 +560,21 @@ class StationsParse using Moose : ro {
     }
 
     method vdstypejoin (HashRef $data, Ref $vds){
-        # carp 'vdstypejon';
+        carp 'vdstypejoin with: ',Dumper(               {
+                    'type_id' => $data->{'type'},
+                    'vds_id'  => $vds->id,
+                }
+            );
         my $vdstype     = $self->fetch_vdstype($data->{'type'});
         my $vdstypejoin;
+        carp 'vdstypejoin with: ',Dumper(               {
+                    'input_type' => $data->{'type'},
+                    'found_type_id' => $vdstype->id,
+                    'vds_id'  => $vds->id,
+                }
+            );
         my $test_eval = eval {
-            $vdstypejoin  = $self->resultset('Public::VdsVdstype')->find_or_create(
+            $vdstypejoin  = $self->resultset('Public::VdsVdstype')->update_or_create(
                 {
                     'type_id' => $vdstype->id,
                     'vds_id'  => $vds->id,
